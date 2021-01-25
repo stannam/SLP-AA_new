@@ -7,7 +7,8 @@ from PyQt5.QtCore import (
     Qt,
     QSize,
     QSettings,
-    QPoint
+    QPoint,
+    pyqtSignal
 )
 from PyQt5.QtWidgets import (
     QFileDialog,
@@ -15,10 +16,12 @@ from PyQt5.QtWidgets import (
     QToolBar,
     QAction,
     QStatusBar,
-    QSplitter,
     QScrollArea,
     QMessageBox,
-    QUndoStack
+    QUndoStack,
+    QMdiArea,
+    QMdiSubWindow,
+    QWidget
 )
 from PyQt5.QtGui import (
     QIcon,
@@ -45,6 +48,19 @@ from lexicon.lexicon_classes import (
     Corpus,
     Sign
 )
+
+
+class SubWindow(QMdiSubWindow):
+    subwindow_closed = pyqtSignal(QWidget)
+
+    def __init__(self, sub_name, widget, **kwargs):
+        super().__init__(**kwargs)
+
+        self.setWindowTitle(sub_name)
+        self.setWidget(widget)
+
+    def closeEvent(self, closeEvent):
+        self.subwindow_closed.emit(self.widget())
 
 
 # TODO: add undo/redo stack: https://doc.qt.io/qt-5/qtwidgets-tools-undoframework-example.html
@@ -175,6 +191,41 @@ class MainWindow(QMainWindow):
         action_edit_preference.triggered.connect(self.on_action_edit_preference)
         action_edit_preference.setCheckable(False)
 
+        # show/hide corpus subwindow
+        self.action_show_sub_corpus = QAction('Show corpus list', parent=self)
+        self.action_show_sub_corpus.setStatusTip('Show/hide corpus list')
+        self.action_show_sub_corpus.triggered.connect(self.on_action_show_sub_corpus)
+        self.action_show_sub_corpus.setCheckable(True)
+        self.action_show_sub_corpus.setChecked(True)
+
+        # show/hide lexical subwindow
+        self.action_show_sub_lexical = QAction('Show lexical information', parent=self)
+        self.action_show_sub_lexical.setStatusTip('Show/hide lexical information')
+        self.action_show_sub_lexical.triggered.connect(self.on_action_show_sub_lexical)
+        self.action_show_sub_lexical.setCheckable(True)
+        self.action_show_sub_lexical.setChecked(True)
+
+        # show/hide transcription subwindow
+        self.action_show_sub_transcription = QAction('Show transcription', parent=self)
+        self.action_show_sub_transcription.setStatusTip('Show/hide transcription')
+        self.action_show_sub_transcription.triggered.connect(self.on_action_show_sub_transcription)
+        self.action_show_sub_transcription.setCheckable(True)
+        self.action_show_sub_transcription.setChecked(True)
+
+        # show/hide illustration subwindow
+        self.action_show_sub_illustration = QAction('Show hand illustration', parent=self)
+        self.action_show_sub_illustration.setStatusTip('Show/hide hand illustration')
+        self.action_show_sub_illustration.triggered.connect(self.on_action_show_sub_illustration)
+        self.action_show_sub_illustration.setCheckable(True)
+        self.action_show_sub_illustration.setChecked(True)
+
+        # show/hide parameter subwindow
+        self.action_show_sub_parameter = QAction('Show parameter specifier', parent=self)
+        self.action_show_sub_parameter.setStatusTip('Show/hide parameter specifier')
+        self.action_show_sub_parameter.triggered.connect(self.on_action_show_sub_parameter)
+        self.action_show_sub_parameter.setCheckable(True)
+        self.action_show_sub_parameter.setChecked(True)
+
         toolbar.addAction(action_new_sign)
         toolbar.addAction(self.action_delete_sign)
         toolbar.addSeparator()
@@ -212,25 +263,22 @@ class MainWindow(QMainWindow):
         menu_edit.addAction(action_copy)
         menu_edit.addAction(action_paste)
 
+        menu_edit = main_menu.addMenu('&View')
+        menu_edit.addAction(self.action_show_sub_corpus)
+        menu_edit.addAction(self.action_show_sub_lexical)
+        menu_edit.addAction(self.action_show_sub_transcription)
+        menu_edit.addAction(self.action_show_sub_illustration)
+        menu_edit.addAction(self.action_show_sub_parameter)
+
         menu_location = main_menu.addMenu('&Location')
         menu_location.addAction(action_define_location)
 
-        central_splitter = QSplitter(Qt.Horizontal, parent=self)
-        right_splitter = QSplitter(Qt.Vertical, parent=self)
-        top_splitter = QSplitter(Qt.Horizontal, parent=self)
-        bottom_splitter = QSplitter(Qt.Horizontal, parent=self)
-
-        right_splitter.addWidget(top_splitter)
-        right_splitter.addWidget(bottom_splitter)
-
         self.corpus_view = CorpusView('Untitled', parent=self)
-        self.corpus_view.resize(QSize(100, 1000))
         self.corpus_view.selected_gloss.connect(self.handle_sign_selected)
 
-        corpus_scroll = QScrollArea(parent=self)
-        corpus_scroll.resize(QSize(100, 1000))
-        corpus_scroll.setWidgetResizable(True)
-        corpus_scroll.setWidget(self.corpus_view)
+        self.corpus_scroll = QScrollArea(parent=self)
+        self.corpus_scroll.setWidgetResizable(True)
+        self.corpus_scroll.setWidget(self.corpus_view)
 
         self.lexical_scroll = LexicalInformationPanel(self.app_settings['metadata']['coder'], self.today, parent=self)
         self.lexical_scroll.finish_edit.connect(self.handle_lexical_edit)
@@ -252,17 +300,86 @@ class MainWindow(QMainWindow):
 
         self.parameter_scroll = ParameterPanel(dict(), self.app_ctx, parent=self)
 
-        top_splitter.addWidget(self.lexical_scroll)
-        top_splitter.addWidget(self.transcription_scroll)
-        bottom_splitter.addWidget(self.illustration_scroll)
-        bottom_splitter.addWidget(self.parameter_scroll)
+        self.main_mdi = QMdiArea(parent=self)
+        self.main_mdi.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.main_mdi.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
-        central_splitter.addWidget(corpus_scroll)
-        central_splitter.addWidget(right_splitter)
+        self.sub_parameter = SubWindow('Parameter', self.parameter_scroll, parent=self)
+        self.sub_parameter.subwindow_closed.connect(self.on_subwindow_manually_closed)
+        self.main_mdi.addSubWindow(self.sub_parameter)
 
-        self.setCentralWidget(central_splitter)
+        self.sub_illustration = SubWindow('Slot illustration', self.illustration_scroll, parent=self)
+        self.sub_illustration.subwindow_closed.connect(self.on_subwindow_manually_closed)
+        self.main_mdi.addSubWindow(self.sub_illustration)
+
+        self.sub_transcription = SubWindow('Hand transcription', self.transcription_scroll, parent=self)
+        self.sub_transcription.subwindow_closed.connect(self.on_subwindow_manually_closed)
+        self.main_mdi.addSubWindow(self.sub_transcription)
+
+        self.sub_lexical = SubWindow('Lexical information', self.lexical_scroll, parent=self)
+        self.sub_lexical.subwindow_closed.connect(self.on_subwindow_manually_closed)
+        self.main_mdi.addSubWindow(self.sub_lexical)
+
+        self.sub_corpus = SubWindow('Corpus', self.corpus_scroll, parent=self)
+        self.sub_corpus.subwindow_closed.connect(self.on_subwindow_manually_closed)
+        self.main_mdi.addSubWindow(self.sub_corpus)
+
+        self.main_mdi.tileSubWindows()
+        self.setCentralWidget(self.main_mdi)
 
         self.open_initialization_window()
+
+    def on_subwindow_manually_closed(self, widget):
+        if widget == self.corpus_scroll:
+            self.action_show_sub_corpus.setChecked(False)
+            self.on_action_show_sub_corpus()
+        elif widget == self.lexical_scroll:
+            self.action_show_sub_lexical.setChecked(False)
+            self.on_action_show_sub_lexical()
+        elif widget == self.transcription_scroll:
+            self.action_show_sub_transcription.setChecked(False)
+            self.on_action_show_sub_transcription()
+        elif widget == self.illustration_scroll:
+            self.action_show_sub_illustration.setChecked(False)
+            self.on_action_show_sub_illustration()
+        elif widget == self.parameter_scroll:
+            self.action_show_sub_parameter.setChecked(False)
+            self.on_action_show_sub_parameter()
+
+    def on_action_show_sub_corpus(self):
+        if self.action_show_sub_corpus.isChecked():
+            self.sub_corpus.show()
+        else:
+            self.sub_corpus.hide()
+        self.main_mdi.tileSubWindows()
+
+    def on_action_show_sub_lexical(self):
+        if self.action_show_sub_lexical.isChecked():
+            self.sub_lexical.show()
+        else:
+            self.sub_lexical.hide()
+        self.main_mdi.tileSubWindows()
+
+    def on_action_show_sub_transcription(self):
+        if self.action_show_sub_transcription.isChecked():
+            self.sub_transcription.show()
+        else:
+            self.sub_transcription.hide()
+        self.main_mdi.tileSubWindows()
+
+    def on_action_show_sub_illustration(self):
+        if self.action_show_sub_illustration.isChecked():
+            self.sub_illustration.show()
+        else:
+            self.sub_illustration.hide()
+        self.main_mdi.tileSubWindows()
+
+    def on_action_show_sub_parameter(self):
+        if self.action_show_sub_parameter.isChecked():
+            self.sub_parameter.show()
+        else:
+            self.sub_parameter.hide()
+        self.main_mdi.tileSubWindows()
 
     def handle_lexical_edit(self, lexical_field):
         undo_command = LexicalUndoCommand(lexical_field)
